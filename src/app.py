@@ -23,7 +23,11 @@ st.markdown("#### Using Machine Learning for Effective Drug Management")
 # --- SIDEBAR ---
 st.sidebar.header("🔧 Configuration")
 st.sidebar.markdown("Select antibiotic and upload isolate data to predict resistance.")
-antibiotic = st.sidebar.selectbox("Select Antibiotic", ["ciprofloxacin", "ampicillin", "ceftriaxone"])
+antibiotic = st.sidebar.selectbox(
+    "Select Antibiotic", 
+    ["ciprofloxacin", "ampicillin", "ceftriaxone", "tetracycline", 
+     "gentamicin", "azithromycin", "trimethoprim-sulfamethoxazole", "chloramphenicol"]
+)
 st.sidebar.info("Currently demoing Ciprofloxacin model trained on isolate + CARD data.")
 
 # --- LOAD MODEL ---
@@ -39,8 +43,28 @@ def load_features(path):
     return X
 
 clf = load_model(MODEL_PATH)
+model_features = list(clf.feature_names_in_)
 X_template = load_features(FEATURES_PATH)
 st.sidebar.success("Model and feature template loaded successfully!")
+
+# --- FUNCTION TO ALIGN USER DATA TO MODEL FEATURES ---
+def align_to_model(df, model_features):
+    """
+    Align dataframe columns to the model's features:
+    - Missing columns are filled with 0
+    - Extra columns are dropped
+    - Duplicate columns are removed (keep first occurrence)
+    """
+    # Normalize column names
+    df.columns = [str(c).replace('[','').replace(']','').replace(';','').replace(' ','') for c in df.columns]
+    
+    # Remove duplicate columns
+    if df.columns.duplicated().any():
+        df = df.loc[:, ~df.columns.duplicated()]
+    
+    # Reindex to model features
+    aligned_df = df.reindex(columns=model_features, fill_value=0)
+    return aligned_df
 
 # --- MODEL UPLOADER ---
 st.sidebar.markdown("### Upload a custom model (optional)")
@@ -51,10 +75,11 @@ model_upload = st.sidebar.file_uploader(
 
 if model_upload:
     clf = joblib.load(model_upload)
+    model_features = list(clf.feature_names_in_)
     st.sidebar.success("Custom model loaded successfully!")
 
 # --- DATA UPLOADER ---
-st.markdown("### 🧫 Enter or Upload Isolate Data")
+st.markdown("### 🧫 Upload Isolate Data")
 data_upload = st.file_uploader(
     "Upload isolate data file (CSV or Parquet)", 
     type=["csv", "parquet"]
@@ -68,53 +93,36 @@ if data_upload:
     else:
         st.error("Unsupported file type!")
         st.stop()
-    st.write("✅ Uploaded data preview:")
-    st.dataframe(user_df.head())
 else:
-    st.markdown("Or select from sample isolates below (randomly loaded for demo).")
-    sample = X_template.sample(5, random_state=42)
-    st.dataframe(sample)
-    user_df = sample
+    # Use sample data silently (no display)
+    user_df = X_template.sample(5, random_state=42)
 
+# Align user data to model
+user_df_aligned = align_to_model(user_df, model_features)
 
 # --- PREDICTION ---
 if st.button("🚀 Predict Resistance"):
-    # --- SANITIZE COLUMN NAMES ---
-    user_df.columns = [
-        str(c).replace('[','_')
-              .replace(']','_')
-              .replace('<','_')
-              .replace('>','_') 
-        for c in user_df.columns
-    ]
-
-    # --- ALIGN FEATURES TO TEMPLATE ---
-    # Fill missing columns with 0, ignore extra columns
-    user_df = user_df.reindex(columns=X_template.columns, fill_value=0)
-
-    # --- PREDICTION ---
-    preds = clf.predict_proba(user_df)[:, 1]
+    preds = clf.predict_proba(user_df_aligned)[:, 1]
+    pred_labels = np.where(preds >= 0.5, "Resistant", "Susceptible")
     pred_df = pd.DataFrame({
         "Prediction Probability (Resistant)": preds,
-        "Prediction Label": np.where(preds >= 0.5, "Resistant", "Susceptible")
+        "Prediction Label": pred_labels
     })
 
     st.markdown("### 🧠 Model Predictions")
     st.dataframe(pred_df)
-    avg = np.mean(preds)
-    st.metric("Average Resistance Probability", f"{avg:.2%}")
+    st.metric("Average Resistance Probability", f"{np.mean(preds):.2%}")
 
     # --- SHAP EXPLANATION ---
     st.markdown("### 🔍 Model Interpretation (SHAP Feature Importance)")
     explainer = shap.TreeExplainer(clf)
-    shap_values = explainer.shap_values(user_df)
+    shap_values = explainer.shap_values(user_df_aligned)
 
-    shap.summary_plot(shap_values, user_df, show=False)
+    shap.summary_plot(shap_values, user_df_aligned, show=False)
     st.pyplot(plt.gcf())
     plt.clf()
 
     st.success("Explanation generated successfully!")
-
 
 # --- FOOTER ---
 st.markdown("---")

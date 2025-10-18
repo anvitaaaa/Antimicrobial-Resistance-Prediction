@@ -151,6 +151,9 @@ def featurize(isolates_path, card_map_csv, antibiotic, outdir, sample=None, test
     # Save
     X_train.to_parquet(f"{outdir}/X_{antibiotic}_train.parquet", index=False)
     X_test.to_parquet(f"{outdir}/X_{antibiotic}_test.parquet", index=False)
+
+    X_test.to_csv(f"{outdir}/X_{antibiotic}_test.csv", index=False)
+
     y_train.to_csv(f"{outdir}/y_{antibiotic}_train.csv", index=False, header=True)
     y_test.to_csv(f"{outdir}/y_{antibiotic}_test.csv", index=False, header=True)
     dom_train.to_csv(f"{outdir}/domains_{antibiotic}_train.csv", index=False, header=True)
